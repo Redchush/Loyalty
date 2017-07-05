@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE gsa-template PUBLIC "-//Art Technology Group, Inc.//DTD General SQL Adapter//EN" "http://www.atg.com/dtds/gsa/gsa_1.0.dtd">
+
+<gsa-template>
+  <header>
+    <name>LoyaltyRepository</name>
+    <author/>
+  </header>
+
+  <item-descriptor name="loyaltyTransaction" default="true" display-property="id"
+                   display-name="PL Transactions" cache-mode="disabled">
+    <table name="dynamusic_lp_transaction" type="primary" id-column-names="id">
+      <property name="id" data-type="string"
+                column-name="id"/>
+      <property name="amount" data-type="int" column-name="amount" required="true"/>
+      <property name="description" data-type="string" column-name="description"  />
+      <property name="date" data-type="timestamp"
+                column-name="creation_date" required="true"/>
+      <property name="profileId" data-type="string"
+                column-name="profile_id" required="true"/>
+    </table>
+
+
+
+    <!--<table name="dynamusic_user_transactions" type="multi"-->
+           <!--id-column-names="transaction_id" >-->
+      <!--<property name="loyaltyTransactions"-->
+                <!--data-type="list"-->
+                <!--component-item-type="loyaltyTransaction"-->
+                <!--column-name="transaction_id"-->
+                <!--repository="/dynamusic/lp/repository/LoyaltyRepository"-->
+                <!--category="PL"/>-->
+    <!--</table>-->
+
+    <!--<table name="dynamusic_user_lp_transaction" type="multi"-->
+    <!--id-column-names="transaction_id">-->
+    <!--<property name="profileId" column-name="user_id"-->
+    <!--component-data-type="string"-->
+    <!--data-type="set"/>-->
+    <!--</table>-->
+
+
+
+  </item-descriptor>
+
+
+
+</gsa-template>

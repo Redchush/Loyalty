@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+
+<!DOCTYPE gsa-template
+    PUBLIC "-//Art Technology Group, Inc.//DTD General SQL Adapter//EN"
+    "http://www.atg.com/dtds/gsa/gsa_1.0.dtd">
+
+<!-- This file provides a starting point for extending the
+     profile repository.
+
+     The comments below coincide with the instructions in the
+     lab.
+ -->
+
+<gsa-template>
+
+  <!--<item-descriptor name="user" >-->
+  <!--<table name="dynamusic_user_playlists" type="multi" id-column-name="user_id">-->
+  <!--<property name="playlists" data-type="set" component-item-type="playlist" column-name="pl_id"/>-->
+  <!--</table>-->
+
+  <!--</item-descriptor>-->
+
+  <item-descriptor name="user" >
+
+    <table name="dynamusic_user_transactions" type="multi"
+           id-column-names="user_id" multi-column-name="transaction_id">
+      <property name="loyaltyTransactions" cache-mode="disabled"
+                data-type="list"
+                component-item-type="loyaltyTransaction"
+                column-name="transaction_id"
+                repository="/dynamusic/lp/repository/LoyaltyRepository"
+                category="PL"/>
+    </table>
+
+    <property name="loyaltyAmount" data-type="int" cache-mode="disabled"
+              property-type="dynamusic.lp.repository.FindLoyaltyAmountDescriptor"
+              category="PL"/>
+
+  </item-descriptor>
+
+</gsa-template>
