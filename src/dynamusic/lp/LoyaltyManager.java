@@ -2,204 +2,119 @@ package dynamusic.lp;
 
 
 import atg.dtm.TransactionDemarcation;
-import atg.dtm.TransactionDemarcationException;
 import atg.nucleus.GenericService;
-import atg.repository.*;
+import atg.nucleus.ServiceException;
+import atg.repository.MutableRepository;
+import atg.repository.Repository;
+import atg.repository.RepositoryException;
+import atg.repository.RepositoryItem;
 import atg.repository.rql.RqlStatement;
-import dynamusic.lp.exception.AddItemException;
-import dynamusic.lp.exception.ManagerException;
-import dynamusic.lp.exception.RemoveItemException;
-import dynamusic.lp.validator.LoyaltyTransactionValidator;
+import dynamusic.system.CollectionUtils;
+import dynamusic.system.command.RepositoryCommandInvoker;
+import dynamusic.system.command.commandimpl.GetItemListByQuery;
+import dynamusic.system.command.commandimpl.change_list.AddItemToListProperty;
+import dynamusic.system.command.commandimpl.change_list.ChangeListProperty;
+import dynamusic.system.command.commandimpl.change_list.RemoveItemFromListProperty;
+import dynamusic.system.validator.DictionaryValidator;
+import dynamusic.system.validator.ValidationStrategy;
+import dynamusic.system.validator.ValidatorCallback;
 
-import javax.transaction.SystemException;
-import javax.transaction.TransactionManager;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
+
+import static dynamusic.lp.LoyaltyConstants.*;
 
 public class LoyaltyManager extends GenericService {
 
-    private static final String USER_TYPE = "user";
-    private static final String USER_TRANSACTION_PROP = "loyaltyTransactions";
-
     private Repository loyaltyRepository;
     private Repository profileRepository;
-    private TransactionManager transactionManager;
+    private RepositoryCommandInvoker invoker;
+    private ValidationStrategy validationStrategy;
+    private DictionaryValidator[] validators;
 
-    private LoyaltyTransactionValidator[] validators;
+    private RqlStatement findUserTransactionsRQL;
 
-    private LoyaltyConfiguration loyaltyConfiguration;
-
+    @Override
+    public void doStartService() throws ServiceException {
+        super.doStartService();
+        try {
+            findUserTransactionsRQL = RqlStatement.parseRqlStatement(PROFILE_ID_PRN  + " = ?0");
+        } catch (RepositoryException e) {
+            throw new ServiceException("Can't parse rql statements", e);
+        }
+        if (isLoggingDebug()){
+            logDebug("Manager created: " + debugString());
+        }
+    }
 
     public List<RepositoryItem>  getUserTransactions(String profileId)  {
-        TransactionDemarcation td = new TransactionDemarcation();
-        try {
-            td.begin(getTransactionManager(), TransactionDemarcation.REQUIRED);
+        Object o = getInvoker().executeAndLog(new GetItemListByQuery(getProfileRepository(),
+                        LOYALTY_ITEM_DRN, findUserTransactionsRQL, new Object[]{profileId}),
+                TransactionDemarcation.REQUIRED, false);
 
-            Repository repo = getLoyaltyRepository();
-            RepositoryView loyaltyView = repo.getView(loyaltyConfiguration.getLoyaltyItemDescriptorName());
-            Object rqlparams[] = new Object[1];
-            rqlparams[0] = profileId;
+        return o==null ? Collections.<RepositoryItem>emptyList() : (List<RepositoryItem>) o;
+    }
 
-            RqlStatement findTransactions = RqlStatement
-                    .parseRqlStatement(loyaltyConfiguration.getProfileIdPropertyName()  + " = ?0");
-
-            RepositoryItem[] items = findTransactions.executeQuery(loyaltyView, rqlparams);
-            return Arrays.asList(items);
-
-        } catch (TransactionDemarcationException e) {
-            error("Demarcation exception during getting user transactions" + profileId, e);
-        } catch (RepositoryException e) {
-            error("Repository exception during getting user transactions" + profileId, e);
-        } finally {
-            try {
-                td.end();
-            } catch (TransactionDemarcationException e) {
-                error("creating transaction demarcation failed", e);
-            }
+    public RepositoryItem createTransaction(String profileId, Integer amount, String description,
+                                            boolean withUserLink){
+        Dictionary<String, Object> propertyDictionary =
+                CommandHelper.createPropertyDictionary(profileId, amount, description, false);
+        boolean success = validateCreateTransaction(propertyDictionary, null);
+        RepositoryItem result = null;
+        if (success){
+            result = (RepositoryItem) getInvoker().executeDefault(
+                    new CreateOrUpdateTransaction(this, propertyDictionary,withUserLink));
         }
-        return Collections.emptyList();
+        return result;
+    }
+
+    public boolean validateCreateTransaction(Dictionary<String, Object> value, ValidatorCallback callback){
+        return getValidationStrategy().executeValidation(getValidators(), value, callback);
+    }
+
+    public boolean validateCreateTransaction(Map<String, Object> value, ValidatorCallback callback){
+        return getValidationStrategy().executeValidation(getValidators(), CollectionUtils.convertMapToDictionary(value), callback);
+    }
+
+    /**
+     * @return true if operation has success, false if operation failed
+     */
+    public boolean addTransactionToUser(String profileId, String transactionId){
+        ChangeListProperty command = fillChangeCommand(new AddItemToListProperty(), profileId, transactionId);
+        return getInvoker().executeAndIsSuccess(command, TransactionDemarcation.REQUIRED, false);
+    }
+
+    /**
+     * @return if operation has success
+     */
+    public boolean removeTransactionFromUser(String profileId, String transactionId){
+        ChangeListProperty command = fillChangeCommand(new RemoveItemFromListProperty(), profileId, transactionId);
+        return getInvoker().executeAndIsSuccess(command, TransactionDemarcation.REQUIRED, false);
+    }
+
+    private ChangeListProperty fillChangeCommand(ChangeListProperty command, String mainItemIdValue, String
+            slaveItemIdValue){
+        command.setMainRepository((MutableRepository) getProfileRepository());
+        command.setSlaveRepository(getLoyaltyRepository());
+        command.setMainItemType(USER_ITEM_DRN);
+        command.setSlaveItemType(LOYALTY_ITEM_DRN);
+        command.setMainItemIdValue(mainItemIdValue);
+        command.setSlaveItemIdValue(slaveItemIdValue);
+        command.setMainItemSlaveProperty(USER_TRANSACTION_PRN);
+        return command;
     }
 
 
-    public void createTransaction(String profileId, Integer amount, String description,
-                                  boolean withUserLink){
-        TransactionDemarcation td = new TransactionDemarcation();
-        try {
-            td.begin(getTransactionManager(), TransactionDemarcation.REQUIRED);
-
-            MutableRepository repo = (MutableRepository) getLoyaltyRepository();
-            MutableRepositoryItem item = repo.createItem(loyaltyConfiguration.getLoyaltyItemDescriptorName());
-            item.setPropertyValue(loyaltyConfiguration.getAmountPropertyName(),amount );
-            if (description!=null){
-                item.setPropertyValue("description", description);
-            }
-            item.setPropertyValue(loyaltyConfiguration.getProfileIdPropertyName(), profileId);
-            long now = System.currentTimeMillis();
-            item.setPropertyValue(loyaltyConfiguration.getCreationDatePropertyName(), now);
-
-            repo.addItem(item);
-            if (withUserLink){
-                addTransactionToUser(item.getRepositoryId(), profileId);
-            }
-        } catch (TransactionDemarcationException e) {
-            error("Demarcation exception during getting user transactions" + profileId, e);
-        } catch (RepositoryException e) {
-            error("Repository exception during getting user transactions" + profileId, e);
-        } catch (AddItemException e) {
-//            nop
-        } finally {
-            try {
-                td.end();
-            } catch (TransactionDemarcationException e) {
-                error("creating transaction demarcation failed", e);
-            }
-        }
-
-    }
-
-
-
-    public void addTransactionToUser(String transactionId, String profileId) throws AddItemException {
-
-        TransactionDemarcation td = new TransactionDemarcation();
-        MutableRepository userRepo = (MutableRepository) getProfileRepository();
-
-        try {
-            td.begin(getTransactionManager(), TransactionDemarcation.MANDATORY);
-
-            MutableRepositoryItem user = userRepo.getItemForUpdate(profileId, USER_TYPE);
-            RepositoryItem transaction = userRepo.getItem(transactionId, loyaltyConfiguration
-                    .getLoyaltyItemDescriptorName());
-
-            Collection userTransactions = (Collection) user.getPropertyValue(USER_TRANSACTION_PROP);
-
-            userTransactions.add(transaction);
-            user.setPropertyValue(USER_TRANSACTION_PROP, userTransactions);
-            userRepo.updateItem(user);
-
-        } catch (TransactionDemarcationException e) {
-            _handleAddExceptions(transactionId, profileId, e);
-            throw new AddItemException();
-        } catch (RepositoryException e) {
-            _handleAddExceptions(transactionId, profileId, e);
-            throw new AddItemException();
-        } finally {
-            _closeTransactionQuietly(td);
-        }
-    }
-
-    public void validateCreateTransaction(){
-
-    }
-
-    public void removeTransactionFromUser(String transactionId, String profileId) throws RemoveItemException {
-        TransactionDemarcation td = new TransactionDemarcation();
-        MutableRepository userRepo = (MutableRepository) getProfileRepository();
-        try {
-            td.begin(getTransactionManager(), TransactionDemarcation.MANDATORY);
-
-            MutableRepositoryItem user = userRepo.getItemForUpdate(profileId, USER_TYPE);
-            RepositoryItem transaction = userRepo.getItem(transactionId, loyaltyConfiguration
-                    .getLoyaltyItemDescriptorName());
-
-            Collection userTransactions = (Collection) user.getPropertyValue(USER_TRANSACTION_PROP);
-
-            userTransactions.remove(transaction);
-            user.setPropertyValue(USER_TRANSACTION_PROP, userTransactions);
-            userRepo.updateItem(user);
-
-        } catch (TransactionDemarcationException e) {
-            _handleRempveExceptions(transactionId, profileId, e);
-            throw new RemoveItemException(" demarcation failed");
-        } catch (RepositoryException e) {
-            _handleRempveExceptions(transactionId, profileId, e);
-            throw new RemoveItemException(" internal problem with exception");
-        } finally {
-            _closeTransactionQuietly(td);
-        }
-    }
-
-    private void _handleAddExceptions(String transactionId, String userId, Throwable e){
-        final String format = " adding transaction id=%s to user id=%s. ";
-        if (isLoggingError()){
-            logError("Exception during " + String.format(format, transactionId, userId), e);
-        }
-        try {
-            getTransactionManager().setRollbackOnly();
-        } catch (SystemException e1) {
-            if (isLoggingError()){
-                logError("Fail to rollback after " + String.format(format, transactionId, userId), e);
-            }
-        }
-    }
-
-    private void _handleRempveExceptions(String transactionId, String userId, Throwable e){
-        final String format = " removing transaction id=%s from user id=%s. ";
-        if (isLoggingError()){
-            logError("Exception during " + String.format(format, transactionId, userId), e);
-        }
-        try {
-            getTransactionManager().setRollbackOnly();
-        } catch (SystemException e1) {
-            if (isLoggingError()){
-                logError("Fail to rollback after " + String.format(format, transactionId, userId), e);
-            }
-        }
-    }
-
-    private void _closeTransactionQuietly(TransactionDemarcation td){
-        try {
-            td.end();
-        } catch (TransactionDemarcationException e) {
-            error("creating transaction demarcation failed", e);
-        }
-    }
-
-    private void error(String msg, Exception e){
-        if (isLoggingError())
-            logError(msg, e);
+    private String debugString() {
+        final StringBuilder sb = new StringBuilder("LoyaltyManager{");
+        sb.append(super.toString()).append(" ");
+        sb.append("loyaltyRepository=").append(loyaltyRepository);
+        sb.append(", profileRepository=").append(profileRepository);
+        sb.append(", invoker=").append(invoker);
+        sb.append(", validationStrategy=").append(validationStrategy);
+        sb.append(", validators=").append(Arrays.toString(validators));
+        sb.append(", findUserTransactionsRQL=").append(findUserTransactionsRQL);
+        sb.append('}');
+        return sb.toString();
     }
 
     public Repository getLoyaltyRepository() {
@@ -210,21 +125,6 @@ public class LoyaltyManager extends GenericService {
         this.loyaltyRepository = loyaltyRepository;
     }
 
-    public TransactionManager getTransactionManager() {
-        return transactionManager;
-    }
-
-    public void setTransactionManager(TransactionManager transactionManager) {
-        this.transactionManager = transactionManager;
-    }
-
-    public LoyaltyConfiguration getLoyaltyConfiguration() {
-        return loyaltyConfiguration;
-    }
-
-    public void setLoyaltyConfiguration(LoyaltyConfiguration loyaltyConfiguration) {
-        this.loyaltyConfiguration = loyaltyConfiguration;
-    }
 
     public Repository getProfileRepository() {
         return profileRepository;
@@ -234,11 +134,27 @@ public class LoyaltyManager extends GenericService {
         this.profileRepository = profileRepository;
     }
 
-    public LoyaltyTransactionValidator[] getValidators() {
+    public DictionaryValidator[] getValidators() {
         return validators;
     }
 
-    public void setValidators(LoyaltyTransactionValidator[] validators) {
+    public void setValidators(DictionaryValidator[] validators) {
         this.validators = validators;
+    }
+
+    public RepositoryCommandInvoker getInvoker() {
+        return invoker;
+    }
+
+    public void setInvoker(RepositoryCommandInvoker invoker) {
+        this.invoker = invoker;
+    }
+
+    public ValidationStrategy getValidationStrategy() {
+        return validationStrategy;
+    }
+
+    public void setValidationStrategy(ValidationStrategy validationStrategy) {
+        this.validationStrategy = validationStrategy;
     }
 }

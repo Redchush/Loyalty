@@ -6,7 +6,7 @@
     <!-- 2 items of type concert -->
 
     <add-item item-descriptor="user" id="3000">
-      <set-property name="login"><![CDATA[first]]></set-property>
+      <set-property name="login"><![CDATA[ksy]]></set-property>
       <set-property name="name"><![CDATA[first]]></set-property>
       <set-property name="description"><![CDATA[no descr]]></set-property>
       <set-property name="publish"><![CDATA[true]]></set-property>

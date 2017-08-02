@@ -1,8 +1,5 @@
 <?xml version="1.0" encoding="ISO-8859-1" ?>
 
-<!DOCTYPE gsa-template
-    PUBLIC "-//Art Technology Group, Inc.//DTD General SQL Adapter//EN"
-    "http://www.atg.com/dtds/gsa/gsa_1.0.dtd">
 
 <!-- This file provides a starting point for extending the
      profile repository.
@@ -11,7 +8,7 @@
      lab.
  -->
 
-<gsa-template>
+<gsa-template xml-combine="append">
 
   <!--<item-descriptor name="user" >-->
   <!--<table name="dynamusic_user_playlists" type="multi" id-column-name="user_id">-->
@@ -23,13 +20,14 @@
   <item-descriptor name="user" >
 
     <table name="dynamusic_user_transactions" type="multi"
-           id-column-names="user_id" multi-column-name="transaction_id">
+           id-column-names="user_id" multi-column-name="sequence_num">
       <property name="loyaltyTransactions" cache-mode="disabled"
+                column-name="transaction_id"
                 data-type="list"
                 component-item-type="loyaltyTransaction"
-                column-name="transaction_id"
                 repository="/dynamusic/lp/repository/LoyaltyRepository"
-                category="PL"/>
+                category="PL" >
+      </property>
     </table>
 
     <property name="loyaltyAmount" data-type="int" cache-mode="disabled"
